@@ -48,6 +48,7 @@
             >
               {{ action }}
             </button>
+            <button class="link" type="button" data-testid="forecast-link" @click="loadForecast(row)">预测联动</button>
           </td>
         </tr>
         <tr v-if="!rows.length">
@@ -55,6 +56,29 @@
         </tr>
       </tbody>
     </table>
+
+    <section v-if="forecast" class="metric-forecast" data-testid="forecast-link-panel">
+      <h3>V030 预测联动 · {{ forecast.指标编号 }}</h3>
+      <p :class="forecast.校验通过 ? 'metric-ok' : 'error-text'" data-testid="forecast-link-status">
+        {{ forecast.校验通过 ? '预测周期位置校验通过' : `校验未通过：${(forecast.问题 || []).join('；')}` }}
+      </p>
+      <table class="data-table">
+        <thead><tr><th>训练批次</th><th>历史窗口</th><th>预测周期</th><th>预测起点</th><th>预测终点</th><th>零斜率策略</th></tr></thead>
+        <tbody>
+          <tr v-for="batch in forecast.批次" :key="batch.训练批次">
+            <td>{{ batch.训练批次 }}</td>
+            <td>{{ batch.历史窗口 }}</td>
+            <td>{{ batch.预测周期 }}</td>
+            <td>{{ batch.预测起点 }}</td>
+            <td>{{ batch.预测终点 }}</td>
+            <td>{{ batch.零斜率策略 === 'last' ? '保留最近观测值' : '统一取历史均值' }}</td>
+          </tr>
+          <tr v-if="!forecast.批次.length">
+            <td colspan="6" class="empty-state">该指标还没有已发布的预测结果</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
 
     <div v-if="showCreate" class="modal-backdrop" data-testid="create-modal">
       <form class="modal" @submit.prevent="submitCreate">
@@ -100,6 +124,7 @@ const filterFields = columns.slice(0, 3)
 const showCreate = ref(false)
 const creating = ref(false)
 const createValues = ref<Record<string, string>>({})
+const forecast = ref<Record<string, any> | null>(null)
 const stats = computed(() => [
   { label: metricNames[0], value: total.value },
   { label: metricNames[1], value: rows.value.filter((row) => row.status === statuses[1]).length },
@@ -184,5 +209,23 @@ async function reload() {
   }
 }
 
+async function loadForecast(row: Row) {
+  errorMessage.value = ''
+  try {
+    const response = await request(`${ENDPOINT}/${row.id}/forecast-results`)
+    if (!response.ok) throw new Error('预测联动读取失败')
+    forecast.value = await response.json()
+  } catch (error) {
+    forecast.value = null
+    errorMessage.value = error instanceof Error ? error.message : '预测联动读取失败'
+  }
+}
+
 onMounted(reload)
 </script>
+
+<style scoped>
+.metric-forecast { margin-top: 16px; padding: 12px; background: #fff; border: 1px solid var(--border); border-radius: 8px; }
+.metric-forecast h3 { font-size: 15px; margin: 0 0 8px; }
+.metric-ok { color: #15803d; font-size: 12px; margin: 4px 0 8px; }
+</style>

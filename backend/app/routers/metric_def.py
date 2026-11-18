@@ -74,6 +74,15 @@ def get_entry(entry_id: int) -> dict:
     return entry
 
 
+@router.get("/{entry_id}/forecast-results")
+def get_forecast_results(entry_id: int) -> dict:
+    """V030 跨模块联动：按指标标识读取预测结果表，并按历史窗口核对周期位置。"""
+    payload = service.get_forecast_results(entry_id)
+    if payload is None:
+        raise HTTPException(status_code=404, detail=f"指标定义 {entry_id} 不存在或已归档")
+    return payload
+
+
 @router.post("", response_model=ActionResult)
 def create_entry(payload: dict[str, object]) -> ActionResult:
     """登记一条指标定义，缺字段时说明原因而不是静默丢弃。"""

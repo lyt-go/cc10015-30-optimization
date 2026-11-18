@@ -5,9 +5,13 @@
 from __future__ import annotations
 
 import time
-from typing import Any
+from contextlib import contextmanager
+from typing import Any, Iterator
 
 from app.seed import SEED_ROWS
+
+# 预测结果表、批次表属于业务内部表：可被 rows() 读写，但不计入模块清单与运营概览。
+INTERNAL_TABLES = {"forecast_result", "forecast_batch"}
 
 
 class Store:
@@ -15,11 +19,13 @@ class Store:
         self._tables: dict[str, list[dict[str, Any]]] = {
             name: [dict(row) for row in rows] for name, rows in SEED_ROWS.items()
         }
+        for name in INTERNAL_TABLES:
+            self._tables.setdefault(name, [])
         self._versions: dict[str, int] = {name: 1 for name in self._tables}
         self._created_at: dict[str, float] = {name: time.time() for name in self._tables}
 
     def module_names(self) -> list[str]:
-        return sorted(self._tables)
+        return sorted(name for name in self._tables if name not in INTERNAL_TABLES)
 
     def rows(self, module: str) -> list[dict[str, Any]]:
         return self._tables.setdefault(module, [])
@@ -42,6 +48,32 @@ class Store:
     def next_id(self, module: str) -> int:
         rows = self.rows(module)
         return max((int(r.get("id", 0)) for r in rows), default=0) + 1
+
+    @contextmanager
+    def transaction(self, *modules: str) -> Iterator[None]:
+        """把若干张表的写入包成一次原子提交：任一步失败就整体回滚。
+
+        内存仓库没有数据库事务，这里用快照实现同样的语义：备份受影响的表，
+        正常结束才替换生效；异常时把快照放回去，调用方看不到半段数据。
+        """
+        names = modules or tuple(self._tables)
+        snapshot = {name: [dict(row) for row in self.rows(name)] for name in names}
+        versions = {name: self.version(name) for name in names}
+        try:
+            yield
+        except Exception:
+            for name, rows in snapshot.items():
+                self._tables[name] = rows
+            for name, version in versions.items():
+                self._versions[name] = version
+            raise
+        else:
+            for name in names:
+                self.bump_version(name)
+
+    def replace_rows(self, module: str, rows: list[dict[str, Any]]) -> None:
+        """整表替换：只在事务内使用，避免调用方持有旧列表引用。"""
+        self._tables[module] = rows
 
     def bump_version(self, module: str) -> int:
         self._versions[module] = self._versions.get(module, 0) + 1
